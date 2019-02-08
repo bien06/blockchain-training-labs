@@ -33,9 +33,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"time"
+
 	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/core/chaincode/lib/cid"
 	sc "github.com/hyperledger/fabric/protos/peer"
 )
 
@@ -43,12 +42,18 @@ import (
 type SmartContract struct {
 }
 
-// Define the car structure, with 4 properties.  Structure tags are used by encoding/json library
-type Car struct {
-	Make   string `json:"make"`
-	Model  string `json:"model"`
-	Colour string `json:"colour"`
-	Owner  string `json:"owner"`
+// Define the invoice structure.  Structure tags are used by encoding/json library
+type Invoice struct {
+	invoiceNumber   string `json:"invoice"`
+	billedTo        string `json:"bill"`
+	invoiceDate     string `json:"invoicedate"`
+	invoiceAmount   string `json:"owner"`
+	itemDescription string `json:"description"`
+	GR              string `json:"gr"`
+	isPaid          string `json:"paid"`
+	paidAmount      string `json:"amount"`
+	repaid          string `json:"repaid"`
+	repaymentAmount string `json:"repaymentamount"`
 }
 
 /*
@@ -68,39 +73,34 @@ func (s *SmartContract) Invoke(APIstub shim.ChaincodeStubInterface) sc.Response 
 	// Retrieve the requested Smart Contract function and arguments
 	function, args := APIstub.GetFunctionAndParameters()
 	// Route to the appropriate handler function to interact with the ledger appropriately
-	if function == "queryCar" {
-		return s.queryCar(APIstub, args)
-	} else if function == "initLedger" {
+	if function == "initLedger" {
 		return s.initLedger(APIstub)
-	} else if function == "createCar" {
-		return s.createCar(APIstub, args)
-	} else if function == "queryAllCars" {
-		return s.queryAllCars(APIstub)
-	} else if function == "changeCarOwner" {
-		return s.changeCarOwner(APIstub, args)	
-	} else if function == "changeCarColour" {
-		return s.changeCarColour(APIstub, args)
-	} else if function == "queryCarsByOwner" { 
-		return s.queryCarsByOwner(APIstub, args)	
-	} else if function == "getHistoryForCar" { 
-		return s.getHistoryForCar(APIstub, args)
+	} else if function == "raiseInvoice" {
+		return s.raiseInvoice(APIstub, args)
+	} else if function == "goodsReceived" {
+		return s.goodsReceived(APIstub, args)
+	} else if function == "paymentToSupplier" {
+		return s.paidToSupplier(APIstub, args)
+	} else if function == "repayToBank" {
+		return s.paidToBank(APIstub, args)
+	} else if function == "displayInvoices" {
+		return s.displayInvoices(APIstub)
 	} else if function == "getUser" {
 		return s.getUser(APIstub, args)
-	} else if function == "createCarWithJsonInput" {
-		return s.createCarWithJsonInput(APIstub, args)
-	} 
+	} else if function == "raiseInvoiceWithJsonInput" {
+		return s.raiseInvoiceWithJsonInput(APIstub, args)
+	}
 
 	return shim.Error("Invalid Smart Contract function name.")
 }
 
 func (s *SmartContract) queryCarsByOwner(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-    //TODO Write approriate code here	
+	//TODO Write approriate code here
 	return shim.Success(nil)
 }
 
 func getQueryResultForQueryString(APIstub shim.ChaincodeStubInterface, queryString string) ([]byte, error) {
-
 
 	resultsIterator, err := APIstub.GetQueryResult(queryString)
 	if err != nil {
@@ -132,11 +132,10 @@ func getQueryResultForQueryString(APIstub shim.ChaincodeStubInterface, queryStri
 		buffer.WriteString("}")
 		bArrayMemberAlreadyWritten = true
 	}
-	buffer.WriteString("]")	
+	buffer.WriteString("]")
 
 	return buffer.Bytes(), nil
 }
-
 
 func (s *SmartContract) queryCar(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
@@ -144,62 +143,75 @@ func (s *SmartContract) queryCar(APIstub shim.ChaincodeStubInterface, args []str
 		return shim.Error("Incorrect number of arguments. Expecting 1")
 	}
 
-	carAsBytes, _ := APIstub.GetState(args[0])
-	return shim.Success(carAsBytes)
+	invoiceAsBytes, _ := APIstub.GetState(args[0])
+	return shim.Success(invoiceAsBytes)
 }
 
+// function for initializing the ledger
 func (s *SmartContract) initLedger(APIstub shim.ChaincodeStubInterface) sc.Response {
-	cars := []Car{
-		Car{Make: "Toyota", Model: "Prius", Colour: "blue", Owner: "Tomoko"},
+	invoice := []Invoice{
+		Invoice{invoiceNumber: "IN01",
+			billedTo:        "Brendan",
+			invoiceDate:     "01JAN2019",
+			invoiceAmount:   "5000",
+			itemDescription: "Smartphone",
+			GR:              "N",
+			isPaid:          "N",
+			paidAmount:      "0",
+			repaid:          "N",
+			repaymentAmount: "0"},
 	}
 
 	i := 0
-	for i < len(cars) {
+	for i < len(invoice) {
 		fmt.Println("i is ", i)
-		carAsBytes, _ := json.Marshal(cars[i])
-		APIstub.PutState("CAR"+strconv.Itoa(i), carAsBytes)
-		fmt.Println("Added", cars[i])
+		invoiceAsBytes, _ := json.Marshal(invoice[i])
+		APIstub.PutState("INVOICE"+strconv.Itoa(i), invoiceAsBytes)
+		fmt.Println("Added", invoice[i])
 		i = i + 1
 	}
 
 	return shim.Success(nil)
 }
 
-func (s *SmartContract) createCar(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+// function for raising invoice
+func (s *SmartContract) raiseInvoice(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	if len(args) != 5 {
-		return shim.Error("Incorrect number of arguments. Expecting 5")
+	if len(args) != 11 {
+		return shim.Error("Incorrect number of arguments. Expecting 11")
 	}
 
-	var car = Car{Make: args[1], Model: args[2], Colour: args[3], Owner: args[4]}
+	var invoice = Invoice{invoiceNumber: args[1], billedTo: args[2], invoiceDate: args[3], invoiceAmount: args[4], itemDescription: args[5], GR: args[6], isPaid: args[7], paidAmount: args[8], repaid: args[9], repaymentAmount: args[10]}
 
-	carAsBytes, _ := json.Marshal(car)
-	APIstub.PutState(args[0], carAsBytes)
+	invoiceAsBytes, _ := json.Marshal(invoice)
+	APIstub.PutState(args[0], invoiceAsBytes)
 
 	return shim.Success(nil)
 }
 
-func (s *SmartContract) createCarWithJsonInput(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+// function for raising invoice with json input
+func (s *SmartContract) raiseInvoiceWithJsonInput(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	if len(args) != 2 {
-		return shim.Error("Incorrect number of arguments. Expecting 5")
+	if len(args) != 11 {
+		return shim.Error("Incorrect number of arguments. Expecting 110")
 	}
 	fmt.Println("args[1] > ", args[1])
-	carAsBytes := []byte(args[1])
-	car := Car{}
-	err := json.Unmarshal(carAsBytes, &car)
+	invoiceAsBytes := []byte(args[1])
+	invoice := Invoice{}
+	err := json.Unmarshal(invoiceAsBytes, &invoice)
 
 	if err != nil {
-		return shim.Error("Error During Car Unmarshall")
+		return shim.Error("Error During Invoice Unmarshall")
 	}
-	APIstub.PutState(args[0], carAsBytes)
+	APIstub.PutState(args[0], invoiceAsBytes)
 	return shim.Success(nil)
 }
 
-func (s *SmartContract) queryAllCars(APIstub shim.ChaincodeStubInterface) sc.Response {
+// function for displaying all invoices
+func (s *SmartContract) displayInvoices(APIstub shim.ChaincodeStubInterface) sc.Response {
 
-	startKey := "CAR0"
-	endKey := "CAR999"
+	startKey := "IN0"
+	endKey := "IN999"
 
 	resultsIterator, err := APIstub.GetStateByRange(startKey, endKey)
 	if err != nil {
@@ -221,7 +233,7 @@ func (s *SmartContract) queryAllCars(APIstub shim.ChaincodeStubInterface) sc.Res
 		if bArrayMemberAlreadyWritten == true {
 			buffer.WriteString(",")
 		}
-		buffer.WriteString("{\"Key\":")
+		buffer.WriteString("{\"Invoice\":")
 		buffer.WriteString("\"")
 		buffer.WriteString(queryResponse.Key)
 		buffer.WriteString("\"")
@@ -234,108 +246,93 @@ func (s *SmartContract) queryAllCars(APIstub shim.ChaincodeStubInterface) sc.Res
 	}
 	buffer.WriteString("]")
 
-	fmt.Printf("- queryAllCars:\n%s\n", buffer.String())
+	fmt.Printf("- displayInvoices:\n%s\n", buffer.String())
 
 	return shim.Success(buffer.Bytes())
 }
 
-func (s *SmartContract) changeCarOwner(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+// function for goods received
+func (s *SmartContract) goodsReceived(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
 	if len(args) != 2 {
 		return shim.Error("Incorrect number of arguments. Expecting 2")
 	}
 
-	carAsBytes, _ := APIstub.GetState(args[0])
-	car := Car{}
+	invoiceAsBytes, _ := APIstub.GetState(args[0])
+	invoice := Invoice{}
 
-	json.Unmarshal(carAsBytes, &car)
-	car.Owner = args[1]
+	json.Unmarshal(invoiceAsBytes, &invoice)
+	invoice.GR = args[1]
 
-	carAsBytes, _ = json.Marshal(car)
-	APIstub.PutState(args[0], carAsBytes)
+	invoiceAsBytes, _ = json.Marshal(invoice)
+	APIstub.PutState(args[0], invoiceAsBytes)
 
 	return shim.Success(nil)
 }
 
-func (s *SmartContract) changeCarColour(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+// function for payment to supplier
+func (s *SmartContract) paidToSupplier(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+
+	if len(args) != 2 {
+		return shim.Error("Incorrect number of arguments. Expecting 2")
+	}
+
+	invoiceAsBytes, _ := APIstub.GetState(args[0])
+	invoice := Invoice{}
+
+	json.Unmarshal(invoiceAsBytes, &invoice)
+	invoice.isPaid = args[1]
+
+	invoiceAsBytes, _ = json.Marshal(invoice)
+	APIstub.PutState(args[0], invoiceAsBytes)
+
 	return shim.Success(nil)
 }
 
+// function for payment to bank
+func (s *SmartContract) paidToBank(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
+
+	if len(args) != 2 {
+		return shim.Error("Incorrect number of arguments. Expecting 2")
+	}
+
+	invoiceAsBytes, _ := APIstub.GetState(args[0])
+	invoice := Invoice{}
+
+	json.Unmarshal(invoiceAsBytes, &invoice)
+	invoice.isPaid = args[1]
+
+	invoiceAsBytes, _ = json.Marshal(invoice)
+	APIstub.PutState(args[0], invoiceAsBytes)
+
+	return shim.Success(nil)
+}
+
+// function for getting current user
 func (s *SmartContract) getUser(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
 
-	attr := args[0]
-	attrValue, _, _ := cid.GetAttributeValue(APIstub,attr)
+	// attr := args[0]
+	// attrValue, _, _ := cid.GetAttributeValue(APIstub, attr)
 
-	msp, _ := cid.GetMSPID(APIstub)
+	// msp, _ := cid.GetMSPID(APIstub)
 
-	var buffer bytes.Buffer
-		buffer.WriteString("{\"User\":")
-		buffer.WriteString("\"")
-		buffer.WriteString(attrValue)
-		buffer.WriteString("\"")
+	// var buffer bytes.Buffer
+	// buffer.WriteString("{\"User\":")
+	// buffer.WriteString("\"")
+	// buffer.WriteString(attrValue)
+	// buffer.WriteString("\"")
 
-		buffer.WriteString(", \"MSP\":")
-		buffer.WriteString("\"")
+	// buffer.WriteString(", \"MSP\":")
+	// buffer.WriteString("\"")
 
-		buffer.WriteString(msp)
-		buffer.WriteString("\"")
+	// buffer.WriteString(msp)
+	// buffer.WriteString("\"")
 
-		buffer.WriteString("}")
-	
+	// buffer.WriteString("}")
 
-	return shim.Success(buffer.Bytes())
+	return shim.Success(nil)
 
 }
-
-func (s *SmartContract) getHistoryForCar(APIstub shim.ChaincodeStubInterface, args []string) sc.Response {
-
-	if len(args) < 1 {
-		return shim.Error("Incorrect number of arguments. Expecting 1")
-	}
-
-	carKey := args[0]
-
-	resultsIterator, err := APIstub.GetHistoryForKey(carKey)
-	if err != nil {
-		return shim.Error(err.Error())
-	}
-	defer resultsIterator.Close()
-
-	// buffer is a JSON array containing historic values for the car
-	var buffer bytes.Buffer
-	buffer.WriteString("[")
-
-	bArrayMemberAlreadyWritten := false
-	for resultsIterator.HasNext() {
-		response, err := resultsIterator.Next()
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-		// Add a comma before array members, suppress it for the first array member
-		if bArrayMemberAlreadyWritten == true {
-			buffer.WriteString(",")
-		}
-		buffer.WriteString("{\"TxId\":")
-		buffer.WriteString("\"")
-		buffer.WriteString(response.TxId)
-		buffer.WriteString("\"")
-
-		buffer.WriteString(", \"Value\":")
-		buffer.WriteString(string(response.Value))
-
-		buffer.WriteString(", \"Timestamp\":")
-		buffer.WriteString("\"")
-		buffer.WriteString(time.Unix(response.Timestamp.Seconds, int64(response.Timestamp.Nanos)).String())
-		buffer.WriteString("\"")
-
-		buffer.WriteString("}")
-		bArrayMemberAlreadyWritten = true
-	}
-	buffer.WriteString("]")
-
-	return shim.Success(buffer.Bytes())
-}
-
 
 // The main function is only relevant in unit test mode. Only included here for completeness.
 func main() {
